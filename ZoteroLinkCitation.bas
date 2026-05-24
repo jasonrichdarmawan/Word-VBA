@@ -1,5 +1,4 @@
 Public Sub ZoteroLinkCitation()
-    
     ' 1. SPEED & SAFETY OPTIMIZATIONS
     Application.ScreenUpdating = False
     Application.DisplayAlerts = wdAlertsNone
@@ -32,6 +31,11 @@ Public Sub ZoteroLinkCitation()
     Dim fieldCount As Long, citationCount As Long
     Dim newLink As Hyperlink
     
+    ' Array variables for sorting Zotero's mismatched JSON
+    Dim titles() As String
+    Dim titleCount As Long
+    Dim i As Long
+    
     fieldCount = 0
     citationCount = 0
     
@@ -48,104 +52,114 @@ Public Sub ZoteroLinkCitation()
             fieldCode = fld.code.Text
             Set citeSearchRange = fld.result.Duplicate
             
+            ' =======================================================
+            ' FIX 4: PRE-LOAD ALL TITLES INTO AN ARRAY
+            ' We must extract them all first so we can sort them
+            ' =======================================================
+            titleCount = 0
+            ReDim titles(0 To 100) ' Max 100 citations per bracket
+            
             Do While InStr(1, fieldCode, """title"":""") > 0
-                citationCount = citationCount + 1
-                
-                ' TITLE EXTRACTION
                 n1 = InStr(1, fieldCode, """title"":""") + Len("""title"":""")
                 n2 = InStr(n1, fieldCode, """,""")
                 If n2 = 0 Then n2 = InStr(n1, fieldCode, """}")
                 If n2 = 0 Then n2 = InStr(n1, fieldCode, """")
                 
                 If n2 > n1 Then
-                    title = Mid(fieldCode, n1, n2 - n1)
-                Else
-                    title = "Unknown"
+                    titles(titleCount) = Mid(fieldCode, n1, n2 - n1)
                 End If
                 
-                title = CleanZoteroTitle(title)
-                
-                ' =======================================================
-                ' FIX 2: BULLETPROOF SEARCH TITLE FOR BIBLIOGRAPHY
-                ' Chop off at the first colon, question mark, or dash
-                ' This prevents the R-ROME non-breaking space bug!
-                ' =======================================================
-                searchTitle = title
-                If InStr(searchTitle, ":") > 0 Then searchTitle = Left(searchTitle, InStr(searchTitle, ":") - 1)
-                If InStr(searchTitle, "?") > 0 Then searchTitle = Left(searchTitle, InStr(searchTitle, "?") - 1)
-                If InStr(searchTitle, "—") > 0 Then searchTitle = Left(searchTitle, InStr(searchTitle, "—") - 1)
-                searchTitle = Trim(searchTitle)
-                If Len(searchTitle) > 20 Then searchTitle = Left(searchTitle, 20)
-                
-                titleAnchor = MakeValidBMName(title) & "_" & citationCount
-                
-                ' NUMBER EXTRACTION
-                With citeSearchRange.Find
-                    .ClearFormatting
-                    .Text = "^#" ' Find first digit
-                    .Forward = True
-                    .Wrap = wdFindStop
-                    
-                    If .Execute Then
-                        citeSearchRange.MoveEndWhile Cset:="0123456789"
-                        Set linkRange = citeSearchRange.Duplicate
-                        
-                        Set bibSearchRange = bibRange.Duplicate
-                        With bibSearchRange.Find
-                            .ClearFormatting
-                            .Text = searchTitle
-                            .Forward = True
-                            .Wrap = wdFindStop
-                            .MatchCase = False
-                            
-                            If .Execute Then
-                                doc.Bookmarks.Add Name:=titleAnchor, Range:=bibSearchRange
-                                
-                                ' =======================================================
-                                ' FIX 1: REMOVED SCREENTIP (TOOLTIP)
-                                ' Prevents Mac Word PDF exporter from corrupting URLs
-                                ' =======================================================
-                                Set newLink = doc.Hyperlinks.Add( _
-                                    Anchor:=linkRange, _
-                                    Address:="", _
-                                    SubAddress:=titleAnchor, _
-                                    ScreenTip:="", _
-                                    TextToDisplay:=linkRange.Text)
-                                
-                                ' Vault completely over the new hyperlink's hidden codes
-                                citeSearchRange.Start = newLink.Range.End
-                            Else
-                                ' If bib search fails, still step past the number
-                                citeSearchRange.Start = linkRange.End
-                            End If
-                            citeSearchRange.End = fld.result.End
-                        End With
-                    End If
-                End With
-                
-                ' Move JSON parser forward
+                titleCount = titleCount + 1
                 fieldCode = Mid(fieldCode, n2 + 1)
             Loop
+            
+            ' Re-size array to actual count
+            If titleCount > 0 Then ReDim Preserve titles(0 To titleCount - 1)
+            
+            ' =======================================================
+            ' THE CORE FIX: MAP VISUAL NUMBERS TO BIBLIOGRAPHY FIRST
+            ' =======================================================
+            ' Instead of trusting Zotero's JSON order, we read the visual numbers
+            ' left-to-right on the screen, search the bibliography for each number,
+            ' grab the title next to that number, and create the link.
+            
+            With citeSearchRange.Find
+                .ClearFormatting
+                .Text = "^#" ' Find first digit on screen (e.g. "1")
+                .Forward = True
+                .Wrap = wdFindStop
+                
+                Do While .Execute
+                    citeSearchRange.MoveEndWhile Cset:="0123456789"
+                    Set linkRange = citeSearchRange.Duplicate
+                    
+                    ' We now know the exact number we are looking at (e.g. "10")
+                    Dim visualNumber As String
+                    visualNumber = linkRange.Text
+                    
+                    ' Find this exact number in the bibliography to get the CORRECT title
+                    Set bibSearchRange = bibRange.Duplicate
+                    With bibSearchRange.Find
+                        .ClearFormatting
+                        .Text = "[" & visualNumber & "]" ' Looks for [10] in the bib
+                        .Forward = True
+                        .Wrap = wdFindStop
+                        .MatchCase = False
+                        
+                        If .Execute Then
+                            ' We found [10] in the bibliography!
+                            ' Now expand the range to grab the title next to it.
+                            bibSearchRange.Expand wdParagraph
+                            searchTitle = bibSearchRange.Text
+                            
+                            ' Clean the bibliography text to generate a valid bookmark
+                            If InStr(searchTitle, ":") > 0 Then searchTitle = Left(searchTitle, InStr(searchTitle, ":") - 1)
+                            If InStr(searchTitle, "?") > 0 Then searchTitle = Left(searchTitle, InStr(searchTitle, "?") - 1)
+                            If InStr(searchTitle, "—") > 0 Then searchTitle = Left(searchTitle, InStr(searchTitle, "—") - 1)
+                            
+                            ' Strip out the [10] part from the string
+                            searchTitle = Replace(searchTitle, "[" & visualNumber & "]", "")
+                            searchTitle = Trim(searchTitle)
+                            
+                            ' Strip LaTeX and special characters
+                            searchTitle = Replace(searchTitle, "\", "")
+                            searchTitle = Replace(searchTitle, "$", "")
+                            searchTitle = Replace(searchTitle, "{", "")
+                            searchTitle = Replace(searchTitle, "}", "")
+                            
+                            titleAnchor = MakeValidBMName(searchTitle) & "_" & citationCount
+                            citationCount = citationCount + 1
+                            
+                            ' Bookmark the bibliography entry
+                            doc.Bookmarks.Add Name:=titleAnchor, Range:=bibSearchRange
+                            
+                            ' Create the hyperlink
+                            Set newLink = doc.Hyperlinks.Add( _
+                                Anchor:=linkRange, _
+                                Address:="", _
+                                SubAddress:=titleAnchor, _
+                                ScreenTip:="", _
+                                TextToDisplay:=linkRange.Text)
+                            
+                            ' Vault completely over the new hyperlink's hidden codes
+                            citeSearchRange.Start = newLink.Range.End
+                        Else
+                            ' If bib search fails, still step past the number
+                            citeSearchRange.Start = linkRange.End
+                        End If
+                    End With
+                    citeSearchRange.End = fld.result.End
+                Loop
+            End With
         End If
     Next fld
 
     ' 5. CLEANUP
     Application.DisplayAlerts = wdAlertsAll
     Application.ScreenUpdating = True
-    Application.StatusBar = "SUCCESS! " & citationCount & " citations linked perfectly for Mac PDF export."
+    Application.StatusBar = "SUCCESS! " & citationCount & " citations perfectly ordered and linked."
 
 End Sub
-
-Function CleanZoteroTitle(str As String) As String
-    Dim res As String
-    res = str
-    res = Replace(res, "<i>", "", 1, -1, vbTextCompare)
-    res = Replace(res, "</i>", "", 1, -1, vbTextCompare)
-    res = Replace(res, "<span class=""nocase"">", "", 1, -1, vbTextCompare)
-    res = Replace(res, "<span class=\""nocase\"">", "", 1, -1, vbTextCompare)
-    res = Replace(res, "</span>", "", 1, -1, vbTextCompare)
-    CleanZoteroTitle = res
-End Function
 
 Function MakeValidBMName(strIn As String) As String
     Dim i As Long, tempStr As String, pFirstChr As String
@@ -164,4 +178,3 @@ Function MakeValidBMName(strIn As String) As String
     
     MakeValidBMName = Left(tempStr, 30)
 End Function
-
