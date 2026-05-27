@@ -1,5 +1,6 @@
-1. [ZoteroLinkcitation.bas](ZoteroLinkCitation.bas) add cross-reference to Zotero Citation.
-2. [ConvertZoteroToWordCrossRef.bas](ConvertZoteroToWordCrossRef.bas) convert Zotero Citation to Word Cross Reference.
+- [GB 7714](GB-T-7714—2015（顺序编码，双语，姓名不大写，无URL、DOI，引用与正文平齐，非折叠，解除中文语言锁定）.csl) is for Zotero plugin, to use GB 7714 citation style.
+- [ZoteroLinkcitation.bas](ZoteroLinkCitation.bas) add cross-reference to Zotero Citation.
+- [ConvertZoteroToWordCrossRef.bas](ConvertZoteroToWordCrossRef.bas) convert Zotero Citation to Word Cross Reference.
 
     Note 1: [ConvertZoteroToWordCrossRef.bas](ConvertZoteroToWordCrossRef.bas) is irreversible. Adding/Editing Citation with Zotero plugin will not work properly.
 
