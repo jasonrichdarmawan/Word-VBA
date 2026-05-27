@@ -8,3 +8,5 @@
     Note 3: After running the macro script, go to "Zotero" menu and click "Unlink Citations". Then, remove the Zotero generated bibliography.
 
     Note 4: You can automatically remove the extra `[1] \t ...` from the copy pasted without formatting bibliography with the Word Find and Replace. Use Wildcards, the regex is `\[[0-9]{1;2}\]^t`.
+
+    ![ConvertZoterotoWordCrossRef](ConvertZoteroToWordCrossRef.png)
